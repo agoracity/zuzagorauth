@@ -1,80 +1,79 @@
 "use client";
-import { useZupass } from "@/zupass";
-import { useZupassPopupMessages } from "@pcd/passport-interface";
-import { SerializedPCD } from "@pcd/pcd-types";
+
+import { Zapp, connect } from "@parcnet-js/app-connector";
+import * as p from "@parcnet-js/podspec";
 import Link from "next/link";
-import { ReadonlyURLSearchParams, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { OuterContainer, PageContainer } from "../components/Zuzagora";
 import { Button } from "../components/core/Button";
-import { RippleLoader } from "../components/core/RippleLoader";
-import { InputParams } from "../types";
-import { authenticate } from "../utils/authenticate";
-import { validateSSO } from "../utils/validateSSO";
 
-export default function Home() {
+const myZapp: Zapp = {
+  name: "Email Proof Zapp",
+  permissions: {
+    REQUEST_PROOF: { collections: ["Email"] },
+    READ_POD: { collections: ["Email"] },
+    READ_PUBLIC_IDENTIFIERS: {}
+  }
+}
+
+function Page() {
   const [loading, setLoading] = useState(false);
-  const [inputParams, setInputParams] = useState<InputParams | null>(null);
-  const { login } = useZupass();
-  const [pcdStr, _pendingPCDStr, multiPCDs] = useZupassPopupMessages();
-  const searchParams = useSearchParams();
+  const [proofResult, setProofResult] = useState<any>(null);
+  const [emailPods, setEmailPods] = useState<any[]>([]);
+  const connectorRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    async function startValidation() {
-      try {
-        const params = await getParams(searchParams);
-        if (searchParams) {
-          const response = await validateSSO(params?.sso, params?.sig);
-          if (response?.isValid) {
-            setLoading(false);
-            setInputParams({ ...params, ...response });
+  const requestProof = async () => {
+    if (!connectorRef.current) return;
+    setLoading(true);
+    
+    try {
+      const clientUrl = "https://zupass.org";
+      const z = await connect(myZapp, connectorRef.current, clientUrl);
+      
+      // Query email PODs
+      const emailQuery = p.pod({
+        entries: {
+          emailAddress: { type: "string" },
+          semaphoreV4PublicKey: { type: "eddsa_pubkey" },
+          pod_type: { type: "string" }
+        }
+      });
+
+      const queryResult = await z.pod.collection("Email").query(emailQuery);
+      console.log("Email PODs:", queryResult);
+      setEmailPods(queryResult);
+
+      // Request proof
+      const result = await z.gpc.prove({
+        request: {
+          pods: {
+            emailPod: {
+              pod: {
+                entries: {
+                  emailAddress: { type: "string" },
+                  semaphoreV4PublicKey: { type: "eddsa_pubkey" },
+                  pod_type: { type: "string" }
+                }
+              },
+              revealed: { 
+                emailAddress: true,
+                semaphoreV4PublicKey: true,
+                pod_type: true
+              }
+            }
           }
         }
-      } catch (error) {
-        console.error("Error fetching data:", error);
-      }
-    }
+      });
 
-    startValidation();
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (multiPCDs) {
-      processProof(multiPCDs);
-    }
-  }, [multiPCDs]);
-
-  const loginHandler = async () => {
-    setLoading(true);
-    await login(inputParams);
-  };
-
-  const processProof = async (multiPCDs: SerializedPCD[]) => {
-    try {
-      const response = await authenticate(multiPCDs);
-      // console.log("🚀 ~ processProof ~ response:", response);
-      console.log(response.encodedPayload);
-      const returnSSOURL = inputParams?.return_sso_url;
-
-      if (response && returnSSOURL) {
-        const redirectURL = `${returnSSOURL}?sso=${response?.encodedPayload}&sig=${response?.sig}`;
-        window.location.href = redirectURL;
-      } else {
-        setLoading(false);
-      }
+      setProofResult(result);
     } catch (error) {
       console.error(error);
+    } finally {
       setLoading(false);
     }
   };
 
-  if (loading) {
-    return (
-      <OuterContainer>
-        <RippleLoader />
-      </OuterContainer>
-    );
-  }
+  console.log('emailPods', emailPods, 'proofResult', proofResult);
 
   return (
     <OuterContainer>
@@ -84,7 +83,13 @@ export default function Home() {
           style={{ justifyContent: "center" }}
         >
           <img className="logo-image" src="logoicon.png" alt="agora logo" />
-          <Button onClick={loginHandler}>Sign In</Button>
+          <div ref={connectorRef} />
+          <Button 
+            onClick={requestProof} 
+            disabled={loading}
+          >
+            {loading ? "Proving..." : "Request Proof"}
+          </Button>
         </div>
         <Link
           href="https://t.me/petrafran"
@@ -98,16 +103,4 @@ export default function Home() {
   );
 }
 
-const getParams = (searchParams: ReadonlyURLSearchParams | null) => {
-  const finalObject: any = {};
-
-  if (searchParams?.has("sso")) {
-    finalObject.sso = searchParams.get("sso");
-  }
-
-  if (searchParams?.has("sig")) {
-    finalObject.sig = searchParams.get("sig");
-  }
-
-  return finalObject;
-};
+export default Page;
