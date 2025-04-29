@@ -51,10 +51,13 @@ async function login(inputParams: InputParams | null) {
 
   const result = await zuAuthPopup(args);
   console.log("🚀 ~ login ~ result:", result);
+  
+  // Return the result so we can handle popup closure in the component
+  return result;
 }
 
 export function useZupass(): {
-  login: (params: InputParams | null) => Promise<void>;
+  login: (params: InputParams | null) => Promise<any>;
 } {
   return { login };
 }

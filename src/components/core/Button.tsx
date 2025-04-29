@@ -8,7 +8,8 @@ export function Button({
   style,
   type,
   size,
-  disabled
+  disabled,
+  customStyle
 }: {
   children: React.ReactNode;
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -16,6 +17,7 @@ export function Button({
   size?: "large" | "small";
   type?: "submit" | "button" | "reset";
   disabled?: boolean;
+  customStyle?: React.CSSProperties;
 }) {
   const Btn =
     style === "danger"
@@ -23,11 +25,11 @@ export function Button({
       : style === "secondary"
       ? BtnSecondary
       : BtnBase;
-  return (
-    <Btn type={type} size={size} onClick={onClick} disabled={disabled}>
-      {children}
-    </Btn>
-  );
+      return (
+        <Btn type={type} size={size} onClick={onClick} disabled={disabled} style={customStyle}>
+          {children}
+        </Btn>
+      );
 }
 
 const buttonStyle = `
