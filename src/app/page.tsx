@@ -1,4 +1,13 @@
-"use client"; // Mark as client-side component
+/* 
+Dev note :
+In the future we could  emit POD's of the PCD's that we receive from the user.
+This would allow to remove the need to offer two different flows (email and ticket). */
+/* 
+TO DO 's :
+Remove unused Components and code
+Add valid types and remove any types and interfaces that are not used
+*/
+"use client";
 
 import { useZupass } from "@/zupass";
 import { Zapp, connect } from "@parcnet-js/app-connector";
@@ -72,6 +81,7 @@ function Page() {
   const { login } = useZupass();
   const [pcdStr, _pendingPCDStr, multiPCDs] = useZupassPopupMessages();
 
+
   /**
    * SSO Validation Effect
    * 
@@ -88,7 +98,10 @@ function Page() {
         const sso = searchParams.get("sso");
         const sig = searchParams.get("sig");
         
-        if (!sso || !sig) return;
+        if (!sso || !sig) {
+          setInputParams(null);
+          return;
+        }
 
         const params: SSOParams = { sso, sig };
         const response = await validateSSO(sso, sig);
@@ -103,6 +116,7 @@ function Page() {
 
     startValidation();
   }, [searchParams]);
+
 
   /**
    * PCD Processing Effect
@@ -173,12 +187,16 @@ function Page() {
    * Alternative authentication flow using tickets:
    * 1. Initiates ticket-based login
    * 2. Processes ticket proof through Zupass
+   * 3. Handles popup closure gracefully
    */
   const handleTicketProof = async () => {
     setLoading(true);
     setAuthMode('ticket');
     try {
-      await login(inputParams);
+      const result = await login(inputParams);
+      if (result?.type === 'popupClosed') {
+        setLoading(false); // Re-enable the button if popup was closed
+      }
     } catch (error) {
       console.error(error);
       setLoading(false);
@@ -279,96 +297,126 @@ function Page() {
           alignItems: 'center',
           textAlign: 'center'
         }}>
-          {/* Logo shown only before email proof */}
-          {!emailProofSuccess && (
-            <>
-              <div className="flex-col" style={{ justifyContent: "center" }}>
-                <img className="logo-image" src="logoicon.png" alt="agora logo" />
-              </div>
-            </>
-          )}
-
-          {/* Zupass connector mount point */}
-          <div ref={connectorRef} />
-          
-          {/* Conditional rendering based on email proof status */}
-          {!emailProofSuccess ? (
-            // Initial email sign-in button
-            <Button 
-              onClick={handleLogin} 
-              disabled={loading}
-              customStyle={{
-                width: '320px',
-                padding: '12px',
-                backgroundColor: '#FFD166',
-                border: 'none',
-                borderRadius: '100px',
-                color: '#1B4332',
-                fontSize: '16px'
-              }}
-            >
-              {loading ? "Signing in..." : "Sign In with Email"}
-            </Button>
-          ) : (
-            // Post-email-proof options
-            <div style={{ 
-              width: '320px',
+          {/* Show error message if no SSO params */}
+          {!inputParams ? (
+            <div style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: '12px'
+              alignItems: 'center',
+              gap: '20px'
             }}>
-              {/* Continue to Agora button */}
-              <Button 
-                onClick={handleContinueToAgora}
-                disabled={loading}
-                customStyle={{ 
-                  width: '100%',
-                  padding: '16px',
+              <img className="logo-image" src="logoicon.png" alt="agora logo" />
+              <p style={{ color: '#1B4332', fontSize: '16px' }}>
+                Invalid login attempt. Please return to Agora and try again.
+              </p>
+              <Button
+                onClick={() => window.location.href = 'https://www.agora.city/login'}
+                customStyle={{
+                  padding: '12px 24px',
                   backgroundColor: '#FFD166',
                   border: 'none',
                   borderRadius: '100px',
                   color: '#1B4332',
-                  fontSize: '18px',
-                  fontWeight: '500'
+                  fontSize: '16px'
                 }}
               >
-                Continue to Agora City
-              </Button>
-              
-              {/* Ticket proof option */}
-              <Button 
-                onClick={handleTicketProof}
-                disabled={loading}
-                customStyle={{ 
-                  width: '100%',
-                  padding: '12px',
-                  backgroundColor: 'transparent',
-                  border: '1px solid #FFD166',
-                  borderRadius: '100px',
-                  color: '#1B4332',
-                  fontSize: '14px',
-                  opacity: '0.8'
-                }}
-              >
-                Prove a Ticket
+                Return to Agora
               </Button>
             </div>
-          )}
+          ) : (
+            <>
+              {/* Logo shown only before email proof */}
+              {!emailProofSuccess && (
+                <>
+                  <div className="flex-col" style={{ justifyContent: "center" }}>
+                    <img className="logo-image" src="logoicon.png" alt="agora logo" />
+                  </div>
+                </>
+              )}
 
-          {/* Help link */}
-          <Link
-            href="https://t.me/petrafran"
-            target="_blank"
-            style={{ 
-              color: '#1B4332',
-              textDecoration: 'none',
-              fontSize: '14px',
-              marginTop: '24px',
-              opacity: '0.7'
-            }}
-          >
-            I'm having trouble connecting
-          </Link>
+              {/* Zupass connector mount point */}
+              <div ref={connectorRef} />
+              
+              {/* Conditional rendering based on email proof status */}
+              {!emailProofSuccess ? (
+                // Initial email sign-in button
+                <Button 
+                  onClick={handleLogin} 
+                  disabled={loading}
+                  customStyle={{
+                    width: '320px',
+                    padding: '12px',
+                    backgroundColor: '#FFD166',
+                    border: 'none',
+                    borderRadius: '100px',
+                    color: '#1B4332',
+                    fontSize: '16px'
+                  }}
+                >
+                  {loading ? "Signing in..." : "Sign In"}
+                </Button>
+              ) : (
+                // Post-email-proof options
+                <div style={{ 
+                  width: '320px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}>
+                  {/* Continue to Agora button */}
+                  <Button 
+                    onClick={handleContinueToAgora}
+                    disabled={loading}
+                    customStyle={{ 
+                      width: '100%',
+                      padding: '16px',
+                      backgroundColor: '#FFD166',
+                      border: 'none',
+                      borderRadius: '100px',
+                      color: '#1B4332',
+                      fontSize: '18px',
+                      fontWeight: '500'
+                    }}
+                  >
+                    Continue to Agora City
+                  </Button>
+                  
+                  {/* Ticket proof option */}
+                  <Button 
+                    onClick={handleTicketProof}
+                    disabled={loading}
+                    customStyle={{ 
+                      width: '100%',
+                      padding: '12px',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #FFD166',
+                      borderRadius: '100px',
+                      color: '#1B4332',
+                      fontSize: '14px',
+                      opacity: '0.8'
+                    }}
+                  >
+                    Prove a Ticket
+                  </Button>
+                </div>
+              )}
+
+              {/* Help link */}
+              <Link
+                href="https://t.me/petrafran"
+                target="_blank"
+                style={{ 
+                  color: '#1B4332',
+                  textDecoration: 'none',
+                  fontSize: '14px',
+                  marginTop: '24px',
+                  opacity: '0.7'
+                }}
+              >
+                I'm having trouble connecting
+              </Link>
+            </>
+          )}
         </div>
       </PageContainer>
     </OuterContainer>
