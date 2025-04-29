@@ -11,7 +11,7 @@ export const generatePodSignature = async (
       nonce: nonce,
       email: email,
       external_id: email, // Using email as external_id for now
-      add_groups: "generic" // Using generic group as requested
+      add_groups: "generic" // Using generic group
     };
 
     // Encoding payload to Base64

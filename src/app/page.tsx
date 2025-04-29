@@ -1,6 +1,9 @@
-"use client";
+"use client"; // Mark as client-side component
 
+import { useZupass } from "@/zupass";
 import { Zapp, connect } from "@parcnet-js/app-connector";
+import { useZupassPopupMessages } from "@pcd/passport-interface";
+import { SerializedPCD } from "@pcd/pcd-types";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -8,58 +11,88 @@ import { OuterContainer, PageContainer } from "../components/Zuzagora";
 import { Button } from "../components/core/Button";
 import { validateSSO } from "../utils/validateSSO";
 
-// Define the Zupass application configuration for email verification
-// This specifies what permissions our app needs from Zupass
+/**
+ * Zupass Application Configuration
+ * 
+ * This defines the permissions our app needs from Zupass:
+ * - REQUEST_PROOF: Allows requesting email proofs from users
+ * - READ_POD: Enables reading email Proof of Data (POD)
+ * - READ_PUBLIC_IDENTIFIERS: Allows access to public identifiers
+ * 
+ * PODs (Proof of Data) are cryptographic proofs that allow users to prove
+ * they own certain data (like an email) without revealing the actual data
+ */
 const myZapp: Zapp = {
   name: "Agora Auth Zapp",
   permissions: {
-    REQUEST_PROOF: { collections: ["Email"] },    // Permission to request email proof from user
-    READ_POD: { collections: ["Email"] },         // Permission to read email PODs (Proof of Data)
-    READ_PUBLIC_IDENTIFIERS: {}                   // Permission to read public identifiers
+    REQUEST_PROOF: { collections: ["Email"] },    
+    READ_POD: { collections: ["Email"] },         
+    READ_PUBLIC_IDENTIFIERS: {}                   
   }
 }
 
-// Interface defining the structure of SSO parameters received and handled by the application
+/**
+ * SSO Parameters Interface
+ * 
+ * Defines the structure of Single Sign-On (SSO) parameters:
+ * - sso: Base64 encoded payload with auth data
+ * - sig: Cryptographic signature to verify SSO payload
+ * - return_sso_url: URL to redirect after successful auth
+ * - nonce: One-time token to prevent replay attacks
+ */
 interface SSOParams {
-  sso: string;                // Base64 encoded payload containing authentication data
-  sig: string;                // Signature to verify the authenticity of the SSO payload
-  return_sso_url?: string;    // URL to return to after successful authentication
-  nonce?: string;             // One-time use value to prevent replay attacks
-  [key: string]: any;         // Allow for additional dynamic properties
+  sso: string;               
+  sig: string;               
+  return_sso_url?: string;   
+  nonce?: string;            
+  [key: string]: any;        
 }
 
 function Page() {
-  // State to manage loading status during authentication process
+  /**
+   * State Management
+   * 
+   * loading: Tracks authentication process status
+   * connectorRef: References DOM element for Zupass connector
+   * searchParams: Access to URL query parameters
+   * inputParams: Stores validated SSO parameters
+   * emailProofSuccess: Tracks if email proof was successful
+   * proofResult: Stores the result of email proof
+   * authMode: Tracks current authentication flow ('email' or 'ticket')
+   */
   const [loading, setLoading] = useState(false);
-  
-  // Reference to the DOM element where Zupass connector will be mounted
   const connectorRef = useRef<HTMLDivElement>(null);
-  
-  // Hook to access URL search parameters
   const searchParams = useSearchParams();
-  
-  // State to store validated SSO parameters and additional data
   const [inputParams, setInputParams] = useState<any>(null);
+  const [emailProofSuccess, setEmailProofSuccess] = useState(false);
+  const [proofResult, setProofResult] = useState<any>(null);
+  const [authMode, setAuthMode] = useState<'email' | 'ticket' | null>(null);
 
-  // Effect hook to validate SSO parameters when the component mounts or URL parameters change
+  // Zupass hooks for ticket verification
+  const { login } = useZupass();
+  const [pcdStr, _pendingPCDStr, multiPCDs] = useZupassPopupMessages();
+
+  /**
+   * SSO Validation Effect
+   * 
+   * Runs when component mounts or URL parameters change
+   * 1. Extracts SSO parameters from URL
+   * 2. Validates SSO signature and payload
+   * 3. Stores validated parameters for later use
+   */
   useEffect(() => {
     async function startValidation() {
       try {
         if (!searchParams) return;
         
-        // Extract SSO parameters from URL
         const sso = searchParams.get("sso");
         const sig = searchParams.get("sig");
         
-        // Only proceed with validation if both SSO and signature are present
         if (!sso || !sig) return;
 
         const params: SSOParams = { sso, sig };
-        
-        // Validate the SSO parameters using backend service
         const response = await validateSSO(sso, sig);
         
-        // If validation successful, store the parameters and validation response
         if (response?.isValid) {
           setInputParams({ ...params, ...response });
         }
@@ -71,32 +104,48 @@ function Page() {
     startValidation();
   }, [searchParams]);
 
-  // Handler for the login button click
+  /**
+   * PCD Processing Effect
+   * 
+   * Handles Proof Carrying Data (PCD) when received from Zupass
+   * PCDs are cryptographic proofs that verify user claims
+   */
+  useEffect(() => {
+    if (multiPCDs) {
+      processProof(multiPCDs);
+    }
+  }, [multiPCDs]);
+
+  /**
+   * Email Authentication Handler
+   * 
+   * Main flow for email-based authentication:
+   * 1. Connects to Zupass client
+   * 2. Requests email proof from user
+   * 3. Processes the proof result
+   * 4. Updates UI state on success
+   */
   const handleLogin = async () => {
-    // Ensure the connector reference exists
     if (!connectorRef.current) return;
     setLoading(true);
     
     try {
-      // Connect to Zupass using the app configuration
+      // Connect to Zupass
       const clientUrl = "https://zupass.org";
       const z = await connect(myZapp, connectorRef.current, clientUrl);
 
-      // Request proof of email ownership from Zupass
-      // This opens the Zupass popup for the user to approve the proof request
+      // Request email proof
       const result = await z.gpc.prove({
         request: {
           pods: {
             emailPod: {
               pod: {
-                // Define the structure of the email proof we need
                 entries: {
                   emailAddress: { type: "string" },
                   semaphoreV4PublicKey: { type: "eddsa_pubkey" },
                   pod_type: { type: "string" }
                 }
               },
-              // Specify which fields should be revealed in the proof
               revealed: { 
                 emailAddress: true,
                 semaphoreV4PublicKey: true,
@@ -107,30 +156,9 @@ function Page() {
         }
       });
 
-      // Ensure we have the necessary SSO parameters before proceeding
-      if (!inputParams?.sso) {
-        throw new Error("Missing SSO parameters");
-      }
-
-      // Send the proof to our backend for validation and SSO token generation
-      const response = await fetch('/api/auth/authenticate-pod', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          proof: result,
-          originalSso: inputParams.sso
-        })
-      });
-
-      const authResponse = await response.json();
-
-      // If authentication successful, redirect back to the original site with new SSO parameters
-      if (authResponse.encodedPayload && authResponse.sig && inputParams?.return_sso_url) {
-        const redirectURL = `${inputParams.return_sso_url}?sso=${authResponse.encodedPayload}&sig=${authResponse.sig}`;
-        window.location.href = redirectURL;
-      }
+      setProofResult(result);
+      setEmailProofSuccess(true);
+      setAuthMode('email');
 
     } catch (error) {
       console.error(error);
@@ -139,30 +167,209 @@ function Page() {
     }
   };
 
-  // Render the authentication interface
+  /**
+   * Ticket Proof Handler
+   * 
+   * Alternative authentication flow using tickets:
+   * 1. Initiates ticket-based login
+   * 2. Processes ticket proof through Zupass
+   */
+  const handleTicketProof = async () => {
+    setLoading(true);
+    setAuthMode('ticket');
+    try {
+      await login(inputParams);
+    } catch (error) {
+      console.error(error);
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Proof Processing Function
+   * 
+   * Handles the verification of received proofs:
+   * 1. Sends proof to backend for verification
+   * 2. Processes authentication response
+   * 3. Redirects user on successful verification
+   */
+  const processProof = async (multiPCDs: SerializedPCD[]) => {
+    try {
+      // Send proof to backend for verification
+      const response = await fetch('/api/auth/authenticate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(multiPCDs)
+      });
+
+      const authResponse = await response.json();
+      const returnSSOURL = inputParams?.return_sso_url;
+
+      // Handle successful authentication
+      if (authResponse && returnSSOURL) {
+        const redirectURL = `${returnSSOURL}?sso=${authResponse?.encodedPayload}&sig=${authResponse?.sig}`;
+        window.location.href = redirectURL;
+      } else {
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error(error);
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Agora Continuation Handler
+   * 
+   * Final step in email authentication flow:
+   * 1. Validates proof result and SSO parameters
+   * 2. Sends proof to backend for POD authentication
+   * 3. Redirects to Agora with authenticated session
+   */
+  const handleContinueToAgora = async () => {
+    if (!proofResult || !inputParams?.sso) {
+      console.error("Missing proof result or SSO parameters");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/authenticate-pod', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          proof: proofResult,
+          originalSso: inputParams.sso
+        })
+      });
+
+      const authResponse = await response.json();
+
+      if (authResponse.encodedPayload && authResponse.sig && inputParams?.return_sso_url) {
+        const redirectURL = `${inputParams.return_sso_url}?sso=${authResponse.encodedPayload}&sig=${authResponse.sig}`;
+        window.location.href = redirectURL;
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * UI Rendering
+   * 
+   * Renders authentication interface with two main states:
+   * 1. Initial state: Shows email sign-in button
+   * 2. Post-email-proof: Shows continue to Agora and ticket proof options
+   * 
+   * The UI adapts based on authentication state and loading status
+   */
   return (
     <OuterContainer>
       <PageContainer>
-        <div className="flex-col" style={{ justifyContent: "center" }}>
-          <img className="logo-image" src="logoicon.png" alt="agora logo" />
-          {/* Div where Zupass connector will be mounted */}
+        {/* Main container with centered content */}
+        <div style={{ 
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center'
+        }}>
+          {/* Logo shown only before email proof */}
+          {!emailProofSuccess && (
+            <>
+              <div className="flex-col" style={{ justifyContent: "center" }}>
+                <img className="logo-image" src="logoicon.png" alt="agora logo" />
+              </div>
+            </>
+          )}
+
+          {/* Zupass connector mount point */}
           <div ref={connectorRef} />
-          {/* Login button that triggers the Zupass authentication flow */}
-          <Button 
-            onClick={handleLogin} 
-            disabled={loading}
+          
+          {/* Conditional rendering based on email proof status */}
+          {!emailProofSuccess ? (
+            // Initial email sign-in button
+            <Button 
+              onClick={handleLogin} 
+              disabled={loading}
+              customStyle={{
+                width: '320px',
+                padding: '12px',
+                backgroundColor: '#FFD166',
+                border: 'none',
+                borderRadius: '100px',
+                color: '#1B4332',
+                fontSize: '16px'
+              }}
+            >
+              {loading ? "Signing in..." : "Sign In with Email"}
+            </Button>
+          ) : (
+            // Post-email-proof options
+            <div style={{ 
+              width: '320px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}>
+              {/* Continue to Agora button */}
+              <Button 
+                onClick={handleContinueToAgora}
+                disabled={loading}
+                customStyle={{ 
+                  width: '100%',
+                  padding: '16px',
+                  backgroundColor: '#FFD166',
+                  border: 'none',
+                  borderRadius: '100px',
+                  color: '#1B4332',
+                  fontSize: '18px',
+                  fontWeight: '500'
+                }}
+              >
+                Continue to Agora City
+              </Button>
+              
+              {/* Ticket proof option */}
+              <Button 
+                onClick={handleTicketProof}
+                disabled={loading}
+                customStyle={{ 
+                  width: '100%',
+                  padding: '12px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #FFD166',
+                  borderRadius: '100px',
+                  color: '#1B4332',
+                  fontSize: '14px',
+                  opacity: '0.8'
+                }}
+              >
+                Prove a Ticket
+              </Button>
+            </div>
+          )}
+
+          {/* Help link */}
+          <Link
+            href="https://t.me/petrafran"
+            target="_blank"
+            style={{ 
+              color: '#1B4332',
+              textDecoration: 'none',
+              fontSize: '14px',
+              marginTop: '24px',
+              opacity: '0.7'
+            }}
           >
-            {loading ? "Signing in..." : "Sign In"}
-          </Button>
+            I'm having trouble connecting
+          </Link>
         </div>
-        {/* Support link for users having trouble */}
-        <Link
-          href="https://t.me/petrafran"
-          target="_blank"
-          style={{ color: "var(--bg-dark-primary)", margin: 15 }}
-        >
-          I'm having trouble connecting
-        </Link>
       </PageContainer>
     </OuterContainer>
   );
